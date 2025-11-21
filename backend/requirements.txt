@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+numpy
+scipy
+matplotlib
+gymnasium
+stable-baselines3
+cvxpy
+websockets
+pydantic
