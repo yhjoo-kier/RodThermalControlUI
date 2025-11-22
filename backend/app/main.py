@@ -65,7 +65,18 @@ class SimulationManager:
                 # RL
                 obs_rl = self.rod_rl.get_sensor_readings().astype(np.float32)
                 action_rl, _ = self.rl_agent.predict(obs_rl)
-                heat_rl = float(action_rl[0]) * 50.0 # Scale if needed, check RLAgent output
+                heat_rl = float(action_rl[0]) # Action is already scaled in Env/Agent if needed, or raw output.
+                # Based on verify_rl.py, the output is directly usable as heat input (0-50 range if Env is correct)
+                # But wait, verify_rl.py uses RLAgent -> Env. 
+                # rl_env.py defines action_space as [0, 50]. 
+                # SB3 PPO usually outputs actions in [-1, 1] if normalized, or within bounds if not.
+                # Let's check rl_env.py again. It uses spaces.Box(low=0.0, high=50.0).
+                # SB3 algorithms (PPO) will output actions in the range of the action space if it's not normalized.
+                # However, usually PPO works with normalized actions [-1, 1] internally.
+                # But let's trust verify_rl.py which says:
+                # action, _ = agent.predict(obs)
+                # heat_input = float(action[0])
+                # So we should use it directly.
                 # RLAgent usually outputs scaled action if using SB3 with normalized env?
                 # Let's assume RLAgent.predict returns [0,1] or [-1,1] -> mapped to [0,50]
                 # In step 328 it was: action_rl = self.rl_agent.predict(obs_rl) -> float(action_rl)

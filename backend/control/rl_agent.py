@@ -30,9 +30,12 @@ class RLAgent:
         if self.model is None:
             if os.path.exists(self.model_path + ".zip"):
                 # Load with environment to ensure correct action scaling
+                print(f"Loading RL model from {self.model_path}...")
                 self.model = PPO.load(self.model_path, env=self.env)
+                print("RL Model loaded successfully.")
             else:
                 # Fallback if not trained
+                print(f"RL Model not found at {self.model_path}.zip. Using zero-action fallback.")
                 import numpy as np
                 return np.array([0.0], dtype=np.float32), None
 
