@@ -104,3 +104,9 @@ coverage.xml
 *~
 .*.swp
 .*.swo
+
+# RL Training artifacts
+best_model/
+eval_logs/
+checkpoints/
+logs/
