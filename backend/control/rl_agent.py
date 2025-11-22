@@ -17,14 +17,24 @@ class RLAgent:
         self.model.learn(total_timesteps=total_timesteps)
         self.model.save(self.model_path)
         
-    def predict(self, observation):
+    def predict(self, observation, deterministic: bool = False):
+        """Return an action for the given observation.
+
+        Args:
+            observation: Current observation from the environment.
+            deterministic: Whether to use a deterministic policy output. Defaults
+                to ``False`` so stochastic actions can be used to avoid a degenerate
+                zero-control policy when the learned mean is near zero.
+        """
+
         if self.model is None:
             if os.path.exists(self.model_path + ".zip"):
-                self.model = PPO.load(self.model_path)
+                # Load with environment to ensure correct action scaling
+                self.model = PPO.load(self.model_path, env=self.env)
             else:
                 # Fallback if not trained
                 import numpy as np
                 return np.array([0.0], dtype=np.float32), None
-        
-        action, state = self.model.predict(observation, deterministic=True)
+
+        action, state = self.model.predict(observation, deterministic=deterministic)
         return action, state
