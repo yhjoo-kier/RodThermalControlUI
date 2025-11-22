@@ -105,8 +105,7 @@ coverage.xml
 .*.swp
 .*.swo
 
-# RL Training artifacts
-best_model/
+# RL Training artifacts (keep model .zip files)
 eval_logs/
 checkpoints/
 logs/
