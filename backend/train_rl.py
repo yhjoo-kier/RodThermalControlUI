@@ -14,7 +14,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from backend.control.rl_env import ThermalEnv
 
 def train_rl_model(
-    total_timesteps=100000,
+    total_timesteps=300000,
     n_envs=4,
     model_save_path="ppo_thermal_rod",
     checkpoint_freq=10000,
@@ -60,13 +60,15 @@ def train_rl_model(
         model = PPO(
             "MlpPolicy",
             env,
-            learning_rate=3e-4,
-            n_steps=2048,
-            batch_size=64,
+            learning_rate=1e-4,
+            n_steps=1024,
+            batch_size=256,
             n_epochs=10,
-            gamma=0.99,
-            gae_lambda=0.95,
+            gamma=0.995,
+            gae_lambda=0.92,
             clip_range=0.2,
+            ent_coef=0.01,
+            policy_kwargs={"net_arch": [256, 256]},
             verbose=1
         )
 
@@ -141,16 +143,16 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Train RL agent for thermal rod control")
-    parser.add_argument("--timesteps", type=int, default=100000,
-                        help="Total training timesteps (default: 100000)")
+    parser.add_argument("--timesteps", type=int, default=300000,
+                        help="Total training timesteps (default: 300000)")
     parser.add_argument("--envs", type=int, default=4,
                         help="Number of parallel environments (default: 4)")
     parser.add_argument("--quick", action="store_true",
-                        help="Quick training mode (20000 timesteps)")
+                        help="Quick training mode (50000 timesteps)")
 
     args = parser.parse_args()
 
-    timesteps = 20000 if args.quick else args.timesteps
+    timesteps = 50000 if args.quick else args.timesteps
 
     train_rl_model(
         total_timesteps=timesteps,
