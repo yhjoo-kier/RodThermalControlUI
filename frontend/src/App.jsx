@@ -10,6 +10,16 @@ function App() {
     const [hCoeff, setHCoeff] = useState(15.0);
     const ws = useRef(null);
 
+    // Training states
+    const [showTrainingModal, setShowTrainingModal] = useState(false);
+    const [trainingStatus, setTrainingStatus] = useState(null);
+    const [trainingConfig, setTrainingConfig] = useState({
+        total_timesteps: 100000,
+        n_envs: 4,
+        checkpoint_freq: 10000
+    });
+    const trainingWs = useRef(null);
+
     useEffect(() => {
         ws.current = new WebSocket('ws://localhost:8000/ws/simulation');
 
@@ -54,6 +64,37 @@ function App() {
         };
     }, []);
 
+    // Training WebSocket
+    useEffect(() => {
+        trainingWs.current = new WebSocket('ws://localhost:8000/ws/training');
+
+        trainingWs.current.onopen = () => {
+            console.log('Connected to training WebSocket');
+        };
+
+        trainingWs.current.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            if (message.type === 'training_update') {
+                setTrainingStatus(message.status);
+
+                // Close modal if training completed or errored
+                if (message.completed || message.error) {
+                    setTimeout(() => {
+                        setShowTrainingModal(false);
+                    }, 3000);
+                }
+            }
+        };
+
+        trainingWs.current.onclose = () => {
+            console.log('Training WebSocket disconnected');
+        };
+
+        return () => {
+            if (trainingWs.current) trainingWs.current.close();
+        };
+    }, []);
+
     const handleStart = () => {
         if (ws.current) ws.current.send(JSON.stringify({ command: 'start' }));
     };
@@ -76,6 +117,45 @@ function App() {
         if (ws.current && !isNaN(val)) {
             ws.current.send(JSON.stringify({ command: 'set_params', h_convection: val }));
         }
+    };
+
+    // Training handlers
+    const handleStartTraining = async () => {
+        try {
+            const response = await fetch('http://localhost:8000/api/train/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(trainingConfig)
+            });
+            const result = await response.json();
+            console.log('Training started:', result);
+            setShowTrainingModal(true);
+        } catch (error) {
+            console.error('Failed to start training:', error);
+            alert('Failed to start training: ' + error.message);
+        }
+    };
+
+    const handleStopTraining = async () => {
+        try {
+            const response = await fetch('http://localhost:8000/api/train/stop', {
+                method: 'POST'
+            });
+            const result = await response.json();
+            console.log('Training stopped:', result);
+        } catch (error) {
+            console.error('Failed to stop training:', error);
+        }
+    };
+
+    const formatTime = (seconds) => {
+        if (!seconds || seconds < 0) return '0s';
+        const hrs = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = Math.floor(seconds % 60);
+        if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+        if (mins > 0) return `${mins}m ${secs}s`;
+        return `${secs}s`;
     };
 
     return (
@@ -106,6 +186,16 @@ function App() {
                         </button>
                         <button onClick={handleReset} className="px-4 py-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-md font-medium shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
                             Reset
+                        </button>
+
+                        <div className="h-6 w-px bg-gray-300 mx-2"></div>
+
+                        <button
+                            onClick={handleStartTraining}
+                            disabled={trainingStatus?.is_training}
+                            className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 text-white rounded-md font-medium shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:cursor-not-allowed"
+                        >
+                            {trainingStatus?.is_training ? '🔄 Training...' : '🎓 Train RL Model'}
                         </button>
 
                         <div className="h-6 w-px bg-gray-300 mx-2"></div>
@@ -213,6 +303,136 @@ function App() {
                     </div>
                 </div>
             </main>
+
+            {/* Training Modal */}
+            {showTrainingModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        {/* Modal Header */}
+                        <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-purple-600 to-indigo-600">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                    <span>🎓</span> RL Model Training
+                                </h2>
+                                <button
+                                    onClick={() => setShowTrainingModal(false)}
+                                    className="text-white hover:text-gray-200 transition-colors"
+                                >
+                                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Body */}
+                        <div className="p-6 space-y-6">
+                            {/* Configuration */}
+                            <div className="bg-gray-50 rounded-lg p-4">
+                                <h3 className="text-sm font-semibold text-gray-700 mb-3">Training Configuration</h3>
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="text-xs text-gray-500">Total Timesteps</label>
+                                        <input
+                                            type="number"
+                                            value={trainingConfig.total_timesteps}
+                                            onChange={(e) => setTrainingConfig({...trainingConfig, total_timesteps: parseInt(e.target.value)})}
+                                            disabled={trainingStatus?.is_training}
+                                            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-gray-500">Parallel Envs</label>
+                                        <input
+                                            type="number"
+                                            value={trainingConfig.n_envs}
+                                            onChange={(e) => setTrainingConfig({...trainingConfig, n_envs: parseInt(e.target.value)})}
+                                            disabled={trainingStatus?.is_training}
+                                            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-gray-500">Checkpoint Freq</label>
+                                        <input
+                                            type="number"
+                                            value={trainingConfig.checkpoint_freq}
+                                            onChange={(e) => setTrainingConfig({...trainingConfig, checkpoint_freq: parseInt(e.target.value)})}
+                                            disabled={trainingStatus?.is_training}
+                                            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Progress */}
+                            {trainingStatus && (
+                                <div className="space-y-4">
+                                    {/* Progress Bar */}
+                                    <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-sm font-medium text-gray-700">Progress</span>
+                                            <span className="text-sm font-bold text-indigo-600">
+                                                {trainingStatus.progress.toFixed(1)}%
+                                            </span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                                            <div
+                                                className="bg-gradient-to-r from-purple-600 to-indigo-600 h-3 rounded-full transition-all duration-300"
+                                                style={{ width: `${trainingStatus.progress}%` }}
+                                            />
+                                        </div>
+                                        <div className="flex justify-between items-center mt-1 text-xs text-gray-500">
+                                            <span>{trainingStatus.current_step.toLocaleString()} / {trainingStatus.total_steps.toLocaleString()} steps</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Stats Grid */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-blue-50 rounded-lg p-4">
+                                            <div className="text-xs text-blue-600 font-medium mb-1">Elapsed Time</div>
+                                            <div className="text-2xl font-bold text-blue-700">
+                                                {formatTime(trainingStatus.elapsed_time)}
+                                            </div>
+                                        </div>
+                                        <div className="bg-purple-50 rounded-lg p-4">
+                                            <div className="text-xs text-purple-600 font-medium mb-1">Estimated Remaining</div>
+                                            <div className="text-2xl font-bold text-purple-700">
+                                                {formatTime(trainingStatus.estimated_remaining)}
+                                            </div>
+                                        </div>
+                                        {trainingStatus.current_reward !== null && (
+                                            <div className="bg-green-50 rounded-lg p-4 col-span-2">
+                                                <div className="text-xs text-green-600 font-medium mb-1">Current Reward</div>
+                                                <div className="text-2xl font-bold text-green-700">
+                                                    {trainingStatus.current_reward.toFixed(2)}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Status Message */}
+                                    <div className="bg-gray-100 rounded-lg p-4">
+                                        <div className="text-xs text-gray-500 font-medium mb-1">Status</div>
+                                        <div className="text-sm text-gray-700 font-mono">
+                                            {trainingStatus.message}
+                                        </div>
+                                    </div>
+
+                                    {/* Stop Button */}
+                                    {trainingStatus.is_training && (
+                                        <button
+                                            onClick={handleStopTraining}
+                                            className="w-full px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-md font-medium shadow-sm transition-colors"
+                                        >
+                                            Stop Training
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

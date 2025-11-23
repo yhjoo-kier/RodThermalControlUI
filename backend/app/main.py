@@ -1,12 +1,21 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import asyncio
 import json
 import numpy as np
+import os
+import sys
+from typing import Optional, Dict, Any
+from datetime import datetime
 from backend.physics.heat_equation import ThermalRod
 from backend.control.mpc_controller import MPCController
 from backend.control.rl_agent import RLAgent
 from backend.control.pid_controller import PIDController
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.env_util import make_vec_env
+from backend.control.rl_env import ThermalEnv
 
 app = FastAPI()
 
@@ -17,6 +26,205 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Pydantic models for API
+class TrainingConfig(BaseModel):
+    total_timesteps: int = 100000
+    n_envs: int = 4
+    checkpoint_freq: int = 10000
+
+class TrainingStatus(BaseModel):
+    is_training: bool
+    current_step: int
+    total_steps: int
+    progress: float
+    elapsed_time: float
+    estimated_remaining: float
+    current_reward: Optional[float] = None
+    message: str
+
+# Custom callback for training progress
+class ProgressCallback(BaseCallback):
+    def __init__(self, training_manager, verbose=0):
+        super().__init__(verbose)
+        self.training_manager = training_manager
+
+    def _on_step(self) -> bool:
+        # Update progress every step
+        self.training_manager.current_step = self.num_timesteps
+
+        # Update reward if available
+        if len(self.locals.get("rewards", [])) > 0:
+            self.training_manager.current_reward = float(np.mean(self.locals["rewards"]))
+
+        # Check if training should be stopped
+        return not self.training_manager.stop_requested
+
+class TrainingManager:
+    def __init__(self):
+        self.is_training = False
+        self.stop_requested = False
+        self.current_step = 0
+        self.total_steps = 0
+        self.start_time = None
+        self.current_reward = None
+        self.task = None
+        self.websockets: list[WebSocket] = []
+
+    async def start_training(self, config: TrainingConfig):
+        if self.is_training:
+            return {"error": "Training already in progress"}
+
+        self.is_training = True
+        self.stop_requested = False
+        self.current_step = 0
+        self.total_steps = config.total_timesteps
+        self.start_time = datetime.now()
+        self.current_reward = None
+
+        # Start training in background
+        self.task = asyncio.create_task(self._train(config))
+
+        return {"status": "Training started"}
+
+    async def _train(self, config: TrainingConfig):
+        try:
+            # Broadcast training started
+            await self._broadcast_status("Training started...")
+
+            # Create vectorized environment
+            await self._broadcast_status(f"Creating {config.n_envs} parallel environments...")
+            env = make_vec_env(ThermalEnv, n_envs=config.n_envs)
+            eval_env = ThermalEnv()
+
+            # Create or load model
+            model_path = "ppo_thermal_rod"
+            if os.path.exists(f"{model_path}.zip"):
+                await self._broadcast_status("Loading existing model...")
+                model = PPO.load(model_path, env=env)
+            else:
+                await self._broadcast_status("Creating new PPO model...")
+                model = PPO(
+                    "MlpPolicy",
+                    env,
+                    learning_rate=3e-4,
+                    n_steps=2048,
+                    batch_size=64,
+                    n_epochs=10,
+                    gamma=0.99,
+                    gae_lambda=0.95,
+                    clip_range=0.2,
+                    verbose=0
+                )
+
+            # Setup callback
+            progress_callback = ProgressCallback(self)
+
+            # Train
+            await self._broadcast_status(f"Training for {config.total_timesteps} timesteps...")
+
+            # Run training in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: model.learn(
+                    total_timesteps=config.total_timesteps,
+                    callback=progress_callback,
+                    progress_bar=False
+                )
+            )
+
+            if not self.stop_requested:
+                # Save model
+                await self._broadcast_status("Saving trained model...")
+                model.save(model_path)
+
+                # Test model
+                await self._broadcast_status("Testing trained model...")
+                obs, _ = eval_env.reset()
+                total_reward = 0
+                for _ in range(100):
+                    action, _ = model.predict(obs, deterministic=True)
+                    obs, reward, terminated, truncated, _ = eval_env.step(action)
+                    total_reward += reward
+                    if terminated or truncated:
+                        break
+
+                await self._broadcast_status(
+                    f"Training completed! Test reward: {total_reward:.2f}",
+                    completed=True
+                )
+            else:
+                await self._broadcast_status("Training stopped by user", completed=True)
+
+            env.close()
+            eval_env.close()
+
+        except Exception as e:
+            await self._broadcast_status(f"Training error: {str(e)}", error=True)
+        finally:
+            self.is_training = False
+            self.stop_requested = False
+
+    async def stop_training(self):
+        if not self.is_training:
+            return {"error": "No training in progress"}
+
+        self.stop_requested = True
+        await self._broadcast_status("Stopping training...")
+
+        return {"status": "Training stop requested"}
+
+    def get_status(self) -> TrainingStatus:
+        elapsed = 0
+        estimated_remaining = 0
+
+        if self.start_time:
+            elapsed = (datetime.now() - self.start_time).total_seconds()
+            if self.current_step > 0:
+                time_per_step = elapsed / self.current_step
+                remaining_steps = self.total_steps - self.current_step
+                estimated_remaining = time_per_step * remaining_steps
+
+        progress = (self.current_step / self.total_steps * 100) if self.total_steps > 0 else 0
+
+        message = "Idle"
+        if self.is_training:
+            message = f"Training... Step {self.current_step}/{self.total_steps}"
+
+        return TrainingStatus(
+            is_training=self.is_training,
+            current_step=self.current_step,
+            total_steps=self.total_steps,
+            progress=progress,
+            elapsed_time=elapsed,
+            estimated_remaining=estimated_remaining,
+            current_reward=self.current_reward,
+            message=message
+        )
+
+    async def _broadcast_status(self, message: str, completed: bool = False, error: bool = False):
+        status = self.get_status()
+        status.message = message
+
+        data = {
+            "type": "training_update",
+            "status": status.dict(),
+            "completed": completed,
+            "error": error
+        }
+
+        # Broadcast to all connected websockets
+        disconnected = []
+        for ws in self.websockets:
+            try:
+                await ws.send_json(data)
+            except:
+                disconnected.append(ws)
+
+        # Remove disconnected websockets
+        for ws in disconnected:
+            self.websockets.remove(ws)
 
 class SimulationManager:
     def __init__(self):
@@ -129,6 +337,48 @@ class SimulationManager:
         self.running = False
 
 manager = SimulationManager()
+training_manager = TrainingManager()
+
+# Training API endpoints
+@app.post("/api/train/start")
+async def start_training(config: TrainingConfig):
+    result = await training_manager.start_training(config)
+    return result
+
+@app.post("/api/train/stop")
+async def stop_training():
+    result = await training_manager.stop_training()
+    return result
+
+@app.get("/api/train/status")
+async def get_training_status():
+    status = training_manager.get_status()
+    return status
+
+@app.websocket("/ws/training")
+async def training_websocket(websocket: WebSocket):
+    await websocket.accept()
+    training_manager.websockets.append(websocket)
+
+    try:
+        # Send initial status
+        status = training_manager.get_status()
+        await websocket.send_json({
+            "type": "training_update",
+            "status": status.dict(),
+            "completed": False,
+            "error": False
+        })
+
+        # Keep connection alive
+        while True:
+            # Just receive ping messages to keep connection alive
+            data = await websocket.receive_text()
+
+    except WebSocketDisconnect:
+        if websocket in training_manager.websockets:
+            training_manager.websockets.remove(websocket)
+        print("Training websocket disconnected")
 
 @app.websocket("/ws/simulation")
 async def websocket_endpoint(websocket: WebSocket):
