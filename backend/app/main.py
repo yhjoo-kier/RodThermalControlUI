@@ -48,14 +48,25 @@ class ProgressCallback(BaseCallback):
     def __init__(self, training_manager, verbose=0):
         super().__init__(verbose)
         self.training_manager = training_manager
+        self.last_log_step = 0
+        self.log_interval = 100  # Log every 100 steps
 
     def _on_step(self) -> bool:
         # Update progress every step
         self.training_manager.current_step = self.num_timesteps
 
-        # Update reward if available
-        if len(self.locals.get("rewards", [])) > 0:
-            self.training_manager.current_reward = float(np.mean(self.locals["rewards"]))
+        # Only log periodically
+        if self.num_timesteps - self.last_log_step >= self.log_interval:
+            # Get recent episode rewards from the logger
+            ep_info_buffer = self.model.ep_info_buffer
+            if len(ep_info_buffer) > 0:
+                recent_rewards = [ep_info['r'] for ep_info in ep_info_buffer]
+                self.training_manager.current_reward = float(np.mean(recent_rewards))
+                print(f"[Training] Step {self.num_timesteps}/{self.training_manager.total_steps} - Avg Reward: {self.training_manager.current_reward:.2f}")
+            else:
+                print(f"[Training] Step {self.num_timesteps}/{self.training_manager.total_steps}")
+
+            self.last_log_step = self.num_timesteps
 
         # Check if training should be stopped
         return not self.training_manager.stop_requested
@@ -69,6 +80,7 @@ class TrainingManager:
         self.start_time = None
         self.current_reward = None
         self.task = None
+        self.broadcast_task = None
         self.websockets: list[WebSocket] = []
 
     async def start_training(self, config: TrainingConfig):
@@ -85,14 +97,33 @@ class TrainingManager:
         # Start training in background
         self.task = asyncio.create_task(self._train(config))
 
+        # Start periodic broadcast task
+        self.broadcast_task = asyncio.create_task(self._periodic_broadcast())
+
         return {"status": "Training started"}
+
+    async def _periodic_broadcast(self):
+        """Periodically broadcast training status to all connected websockets"""
+        try:
+            while self.is_training:
+                await asyncio.sleep(2)  # Broadcast every 2 seconds
+                if self.current_step > 0:
+                    await self._broadcast_status(
+                        f"Training... Step {self.current_step}/{self.total_steps}"
+                    )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"[Training] Broadcast task error: {e}")
 
     async def _train(self, config: TrainingConfig):
         try:
             # Broadcast training started
+            print(f"[Training] Starting training with config: {config}")
             await self._broadcast_status("Training started...")
 
             # Create vectorized environment
+            print(f"[Training] Creating {config.n_envs} parallel environments...")
             await self._broadcast_status(f"Creating {config.n_envs} parallel environments...")
             env = make_vec_env(ThermalEnv, n_envs=config.n_envs)
             eval_env = ThermalEnv()
@@ -100,9 +131,13 @@ class TrainingManager:
             # Create or load model
             model_path = "ppo_thermal_rod"
             if os.path.exists(f"{model_path}.zip"):
+                print(f"[Training] Loading existing model from {model_path}.zip")
                 await self._broadcast_status("Loading existing model...")
                 model = PPO.load(model_path, env=env)
+                # Set verbose for continued training
+                model.verbose = 1
             else:
+                print("[Training] Creating new PPO model...")
                 await self._broadcast_status("Creating new PPO model...")
                 model = PPO(
                     "MlpPolicy",
@@ -114,17 +149,19 @@ class TrainingManager:
                     gamma=0.99,
                     gae_lambda=0.95,
                     clip_range=0.2,
-                    verbose=0
+                    verbose=1  # Changed to 1 for logging
                 )
 
             # Setup callback
             progress_callback = ProgressCallback(self)
 
             # Train
+            print(f"[Training] Starting training for {config.total_timesteps} timesteps...")
             await self._broadcast_status(f"Training for {config.total_timesteps} timesteps...")
 
             # Run training in executor to avoid blocking
             loop = asyncio.get_event_loop()
+            print("[Training] Running model.learn() in executor...")
             await loop.run_in_executor(
                 None,
                 lambda: model.learn(
@@ -133,13 +170,16 @@ class TrainingManager:
                     progress_bar=False
                 )
             )
+            print("[Training] model.learn() completed!")
 
             if not self.stop_requested:
                 # Save model
+                print(f"[Training] Saving model to {model_path}.zip")
                 await self._broadcast_status("Saving trained model...")
                 model.save(model_path)
 
                 # Test model
+                print("[Training] Testing trained model...")
                 await self._broadcast_status("Testing trained model...")
                 obs, _ = eval_env.reset()
                 total_reward = 0
@@ -150,21 +190,34 @@ class TrainingManager:
                     if terminated or truncated:
                         break
 
+                print(f"[Training] Training completed! Test reward: {total_reward:.2f}")
                 await self._broadcast_status(
                     f"Training completed! Test reward: {total_reward:.2f}",
                     completed=True
                 )
             else:
+                print("[Training] Training stopped by user")
                 await self._broadcast_status("Training stopped by user", completed=True)
 
             env.close()
             eval_env.close()
 
         except Exception as e:
+            print(f"[Training] ERROR: {str(e)}")
+            import traceback
+            traceback.print_exc()
             await self._broadcast_status(f"Training error: {str(e)}", error=True)
         finally:
             self.is_training = False
             self.stop_requested = False
+
+            # Cancel broadcast task
+            if self.broadcast_task:
+                self.broadcast_task.cancel()
+                try:
+                    await self.broadcast_task
+                except asyncio.CancelledError:
+                    pass
 
     async def stop_training(self):
         if not self.is_training:
