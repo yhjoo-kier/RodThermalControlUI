@@ -30,12 +30,55 @@ npm install
 
 Docker와 Docker Compose가 설치되어 있다면:
 
+#### 기본 명령어
+
 ```bash
-docker-compose up
+# 첫 실행 또는 이미지 재빌드
+docker-compose up --build
+
+# 백그라운드에서 실행 (권장)
+docker-compose up -d
+
+# 로그 실시간 확인
+docker-compose logs -f
+
+# 특정 서비스 로그만 확인
+docker-compose logs -f backend
+docker-compose logs -f frontend
+
+# 컨테이너 상태 확인
+docker-compose ps
+
+# 컨테이너 중지
+docker-compose stop
+
+# 컨테이너 중지 및 제거
+docker-compose down
+
+# 컨테이너 재시작
+docker-compose restart
 ```
 
-- 백엔드: http://localhost:8000
-- 프론트엔드: http://localhost:5173
+#### 접속 주소
+
+- **프론트엔드**: http://localhost:5173
+- **백엔드 API**: http://localhost:8000
+- **API 문서**: http://localhost:8000/docs
+
+#### RL 모델 학습
+
+Docker 환경에서 RL 학습을 실행하는 방법:
+
+```bash
+# 웹 UI에서 학습 (가장 간단)
+# http://localhost:5173 접속 → "🎓 Train RL Model" 버튼 클릭
+
+# 또는 CLI로 학습
+docker-compose exec backend python backend/train_rl.py --quick      # 테스트 (2-5분)
+docker-compose exec backend python backend/train_rl.py --standard   # 권장 (30-60분)
+```
+
+자세한 내용은 [DOCKER_TRAINING_GUIDE.md](./DOCKER_TRAINING_GUIDE.md) 참조
 
 ### Option 2: 로컬에서 직접 실행
 
