@@ -32,6 +32,10 @@ class TrainingConfig(BaseModel):
     total_timesteps: int = 100000
     n_envs: int = 4
     checkpoint_freq: int = 10000
+    reward_type: str = "shaped"  # "simple", "shaped", or "dense"
+    learning_rate: float = 3e-4
+    n_steps: int = 2048
+    batch_size: int = 64
 
 class TrainingStatus(BaseModel):
     is_training: bool
@@ -124,9 +128,10 @@ class TrainingManager:
 
             # Create vectorized environment
             print(f"[Training] Creating {config.n_envs} parallel environments...")
-            await self._broadcast_status(f"Creating {config.n_envs} parallel environments...")
-            env = make_vec_env(ThermalEnv, n_envs=config.n_envs)
-            eval_env = ThermalEnv()
+            print(f"[Training] Reward type: {config.reward_type}")
+            await self._broadcast_status(f"Creating {config.n_envs} parallel environments (reward: {config.reward_type})...")
+            env = make_vec_env(lambda: ThermalEnv(reward_type=config.reward_type), n_envs=config.n_envs)
+            eval_env = ThermalEnv(reward_type=config.reward_type)
 
             # Create or load model
             model_path = "ppo_thermal_rod"
@@ -138,18 +143,29 @@ class TrainingManager:
                 model.verbose = 1
             else:
                 print("[Training] Creating new PPO model...")
+                print(f"[Training] LR: {config.learning_rate}, n_steps: {config.n_steps}, batch_size: {config.batch_size}")
                 await self._broadcast_status("Creating new PPO model...")
+
+                # Configure network architecture
+                policy_kwargs = dict(
+                    net_arch=dict(pi=[256, 256], vf=[256, 256])  # Larger networks for complex control
+                )
+
                 model = PPO(
                     "MlpPolicy",
                     env,
-                    learning_rate=3e-4,
-                    n_steps=2048,
-                    batch_size=64,
+                    learning_rate=config.learning_rate,
+                    n_steps=config.n_steps,
+                    batch_size=config.batch_size,
                     n_epochs=10,
                     gamma=0.99,
                     gae_lambda=0.95,
                     clip_range=0.2,
-                    verbose=1  # Changed to 1 for logging
+                    ent_coef=0.01,  # Encourage exploration
+                    vf_coef=0.5,
+                    max_grad_norm=0.5,
+                    policy_kwargs=policy_kwargs,
+                    verbose=1
                 )
 
             # Setup callback

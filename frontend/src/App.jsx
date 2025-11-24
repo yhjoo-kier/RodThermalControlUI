@@ -16,8 +16,20 @@ function App() {
     const [trainingConfig, setTrainingConfig] = useState({
         total_timesteps: 100000,
         n_envs: 4,
-        checkpoint_freq: 10000
+        checkpoint_freq: 10000,
+        reward_type: 'shaped',
+        learning_rate: 0.0003,
+        n_steps: 2048,
+        batch_size: 64
     });
+
+    // Preset configurations
+    const trainingPresets = {
+        quick: { total_timesteps: 20000, n_envs: 4, name: '⚡ Quick Test' },
+        standard: { total_timesteps: 500000, n_envs: 8, name: '📊 Standard' },
+        gpu: { total_timesteps: 2000000, n_envs: 16, name: '🎮 GPU Training' },
+        intensive: { total_timesteps: 10000000, n_envs: 32, name: '🚀 Intensive GPU' }
+    };
     const trainingWs = useRef(null);
 
     useEffect(() => {
@@ -327,39 +339,119 @@ function App() {
 
                         {/* Modal Body */}
                         <div className="p-6 space-y-6">
+                            {/* Presets */}
+                            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-lg p-4">
+                                <h3 className="text-sm font-semibold text-gray-700 mb-3">Quick Presets</h3>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {Object.entries(trainingPresets).map(([key, preset]) => (
+                                        <button
+                                            key={key}
+                                            onClick={() => setTrainingConfig({
+                                                ...trainingConfig,
+                                                total_timesteps: preset.total_timesteps,
+                                                n_envs: preset.n_envs
+                                            })}
+                                            disabled={trainingStatus?.is_training}
+                                            className="px-4 py-2 bg-white hover:bg-indigo-50 border border-gray-200 hover:border-indigo-300 rounded-md text-sm font-medium text-gray-700 hover:text-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {preset.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             {/* Configuration */}
                             <div className="bg-gray-50 rounded-lg p-4">
-                                <h3 className="text-sm font-semibold text-gray-700 mb-3">Training Configuration</h3>
-                                <div className="grid grid-cols-3 gap-4">
-                                    <div>
-                                        <label className="text-xs text-gray-500">Total Timesteps</label>
-                                        <input
-                                            type="number"
-                                            value={trainingConfig.total_timesteps}
-                                            onChange={(e) => setTrainingConfig({...trainingConfig, total_timesteps: parseInt(e.target.value)})}
-                                            disabled={trainingStatus?.is_training}
-                                            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
-                                        />
+                                <h3 className="text-sm font-semibold text-gray-700 mb-3">Training Parameters</h3>
+                                <div className="space-y-4">
+                                    {/* Main parameters */}
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <label className="text-xs text-gray-500">Total Timesteps</label>
+                                            <input
+                                                type="number"
+                                                value={trainingConfig.total_timesteps}
+                                                onChange={(e) => setTrainingConfig({...trainingConfig, total_timesteps: parseInt(e.target.value)})}
+                                                disabled={trainingStatus?.is_training}
+                                                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-500">Parallel Envs</label>
+                                            <input
+                                                type="number"
+                                                value={trainingConfig.n_envs}
+                                                onChange={(e) => setTrainingConfig({...trainingConfig, n_envs: parseInt(e.target.value)})}
+                                                disabled={trainingStatus?.is_training}
+                                                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-gray-500">Checkpoint Freq</label>
+                                            <input
+                                                type="number"
+                                                value={trainingConfig.checkpoint_freq}
+                                                onChange={(e) => setTrainingConfig({...trainingConfig, checkpoint_freq: parseInt(e.target.value)})}
+                                                disabled={trainingStatus?.is_training}
+                                                className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="text-xs text-gray-500">Parallel Envs</label>
-                                        <input
-                                            type="number"
-                                            value={trainingConfig.n_envs}
-                                            onChange={(e) => setTrainingConfig({...trainingConfig, n_envs: parseInt(e.target.value)})}
-                                            disabled={trainingStatus?.is_training}
-                                            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="text-xs text-gray-500">Checkpoint Freq</label>
-                                        <input
-                                            type="number"
-                                            value={trainingConfig.checkpoint_freq}
-                                            onChange={(e) => setTrainingConfig({...trainingConfig, checkpoint_freq: parseInt(e.target.value)})}
-                                            disabled={trainingStatus?.is_training}
-                                            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
-                                        />
+
+                                    {/* Advanced parameters */}
+                                    <div className="border-t border-gray-200 pt-4">
+                                        <h4 className="text-xs font-semibold text-gray-600 mb-3">Advanced Settings</h4>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-xs text-gray-500">Reward Type</label>
+                                                <select
+                                                    value={trainingConfig.reward_type}
+                                                    onChange={(e) => setTrainingConfig({...trainingConfig, reward_type: e.target.value})}
+                                                    disabled={trainingStatus?.is_training}
+                                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                                >
+                                                    <option value="simple">Simple</option>
+                                                    <option value="shaped">Shaped (Recommended)</option>
+                                                    <option value="dense">Dense</option>
+                                                </select>
+                                                <p className="text-xs text-gray-400 mt-1">
+                                                    {trainingConfig.reward_type === 'simple' && 'Basic reward function'}
+                                                    {trainingConfig.reward_type === 'shaped' && 'Rewards improvement (best)'}
+                                                    {trainingConfig.reward_type === 'dense' && 'Frequent positive signals'}
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500">Learning Rate</label>
+                                                <input
+                                                    type="number"
+                                                    step="0.0001"
+                                                    value={trainingConfig.learning_rate}
+                                                    onChange={(e) => setTrainingConfig({...trainingConfig, learning_rate: parseFloat(e.target.value)})}
+                                                    disabled={trainingStatus?.is_training}
+                                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500">N Steps</label>
+                                                <input
+                                                    type="number"
+                                                    value={trainingConfig.n_steps}
+                                                    onChange={(e) => setTrainingConfig({...trainingConfig, n_steps: parseInt(e.target.value)})}
+                                                    disabled={trainingStatus?.is_training}
+                                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-gray-500">Batch Size</label>
+                                                <input
+                                                    type="number"
+                                                    value={trainingConfig.batch_size}
+                                                    onChange={(e) => setTrainingConfig({...trainingConfig, batch_size: parseInt(e.target.value)})}
+                                                    disabled={trainingStatus?.is_training}
+                                                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-100"
+                                                />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
