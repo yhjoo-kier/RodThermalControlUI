@@ -20,8 +20,13 @@ function App() {
     });
     const trainingWs = useRef(null);
 
+    // 동적으로 백엔드 주소 결정 (다른 PC에서 접속 지원)
+    const backendHost = window.location.hostname;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const httpProtocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+
     useEffect(() => {
-        ws.current = new WebSocket('ws://localhost:8000/ws/simulation');
+        ws.current = new WebSocket(`${wsProtocol}//${backendHost}:8000/ws/simulation`);
 
         ws.current.onopen = () => {
             console.log('Connected to WebSocket');
@@ -66,7 +71,7 @@ function App() {
 
     // Training WebSocket
     useEffect(() => {
-        trainingWs.current = new WebSocket('ws://localhost:8000/ws/training');
+        trainingWs.current = new WebSocket(`${wsProtocol}//${backendHost}:8000/ws/training`);
 
         trainingWs.current.onopen = () => {
             console.log('Connected to training WebSocket');
@@ -122,7 +127,7 @@ function App() {
     // Training handlers
     const handleStartTraining = async () => {
         try {
-            const response = await fetch('http://localhost:8000/api/train/start', {
+            const response = await fetch(`${httpProtocol}//${backendHost}:8000/api/train/start`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(trainingConfig)
@@ -138,7 +143,7 @@ function App() {
 
     const handleStopTraining = async () => {
         try {
-            const response = await fetch('http://localhost:8000/api/train/stop', {
+            const response = await fetch(`${httpProtocol}//${backendHost}:8000/api/train/stop`, {
                 method: 'POST'
             });
             const result = await response.json();

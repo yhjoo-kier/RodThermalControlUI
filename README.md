@@ -37,6 +37,27 @@ docker-compose up
 - 백엔드: http://localhost:8000
 - 프론트엔드: http://localhost:5173
 
+#### 외부 네트워크에서 접속하기
+
+같은 네트워크 내 다른 PC에서 접속하려면:
+
+1. **서버 IP 주소 확인**
+   ```bash
+   hostname -I
+   ```
+
+2. **방화벽 포트 개방** (Ubuntu/Debian)
+   ```bash
+   sudo ufw allow 5173
+   sudo ufw allow 8000
+   ```
+
+3. **다른 PC에서 접속**
+   - 프론트엔드: `http://<서버IP>:5173`
+   - 백엔드 API: `http://<서버IP>:8000`
+
+> 프론트엔드는 접속한 브라우저의 호스트명을 기준으로 백엔드 주소를 자동 결정합니다.
+
 ### Option 2: 로컬에서 직접 실행
 
 #### 백엔드 실행
