@@ -99,6 +99,7 @@ coverage.xml
 *.bak
 *.swp
 *~
+.commit_msg
 
 # Editor backups
 *~
