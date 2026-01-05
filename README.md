@@ -124,3 +124,6 @@ RodThermalControlUI/
 - `verify_ws.py`: WebSocket 연결 검증
 - `verify_rl.py`: 사전 학습된 RL 정책이 0이 아닌 제어 입력을 생성하는지 확인
 - `reproduce_mpc.py`: MPC 성능 분석
+
+---
+*마지막 업데이트: 2026-01-05*
